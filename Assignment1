@@ -1,0 +1,92 @@
+#Data structure for hopmatrix and function to read from text file - DONE
+#boundscheck, goalTest and getMoves auxillary functions - DONE
+#Heuristic function and research
+#A star implementation
+#Priority queue implementation - DONE
+
+import priorityqueue as PQ
+
+hopmatrix = []
+visited = {}
+m=0
+n=0
+    
+def readhopmatrix():
+    global hopmatrix
+    file = open("HopMatrix.txt","r")
+    i=0
+
+    for line in file:
+        row = line.split(' ')
+        ls = []
+        j=0
+        for ele in row:
+            cell = ele.split(',')
+            if(not cell[0]=="DEST"):
+                cell[0] = int(cell[0])
+                cell[1] = int(cell[1])
+            cell.append(i)
+            cell.append(j)
+            ls.append(cell)
+            j+=1
+        hopmatrix.append(ls)
+        i+=1
+
+    global m,n
+    m = len(hopmatrix)
+    n = len(hopmatrix[0])
+    file.close()
+
+def goalTest(state):      
+    return state[0]=="DEST"
+
+def boundscheck(i,j):
+    global m,n
+    return ((i>=0 and i<m) and (j>=0 and j<n))
+
+def getMoves(state):
+
+    global hopmatrix
+    possiblemoves = []
+    movelist = []
+    i = state[2]
+    j = state[3]
+
+    if(state[0]==0):
+        for k in range(1,state[1]+1):
+            possiblemoves.append([i+k,j])
+            possiblemoves.append([i-k,j])
+            possiblemoves.append([i,j+k])
+            possiblemoves.append([i,j-k])
+
+    else:
+        b = state[1]
+        if(state[0]==1):
+            possiblemoves.append([i+b,j])
+            possiblemoves.append([i,j+b])
+        elif(state[0]==-1):
+            possiblemoves.append([i-b,j])
+            possiblemoves.append([i,j-b])
+        else:
+            print "Not a valid matrix state : ",state
+
+    for move in possiblemoves:
+         if(boundscheck(move[0],move[1])):
+             movelist.append(hopmatrix[move[0]][move[1]])
+                
+    return movelist
+
+def AStarSearch(state):
+    steps = 1 
+    if(goalTest(state)):
+        print "Destination reached in",steps,"moves."
+        return
+    pq = PQ.priorityqueue()
+    visited[(state[0],state[1])] = True
+    moves = getMoves(state)
+    steps+=1
+    print moves
+    
+readhopmatrix()
+AStarSearch(hopmatrix[0][0])
+print hopmatrix
