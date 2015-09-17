@@ -1,0 +1,167 @@
+n = 0
+initboard = []
+
+#0 for white, 1 for black
+#White(computer) starts first
+movebit = 0
+
+def init(size):
+    global n
+    global initboard
+    n = size
+    for i in xrange(0,n):
+        lis = []
+        for j in xrange(0,n):
+            lis.append(0)
+        initboard.append(lis)
+
+    #1 for W at top, 2 for B at bottom
+    for i in xrange(0,n):
+        initboard[0][i] = 1
+        initboard[n-1][i] = 2
+
+
+def printBoard(board):
+    global n
+    print " ",
+    for i in xrange(0,n):
+        print i,
+    print ""
+    for i in xrange(0,n):
+        print i,
+        for j in xrange(0,n):
+            if(board[i][j]==0):
+                print 'X',
+            elif(board[i][j]==1):
+                print 'W',
+            elif(board[i][j]==2):
+                print 'B',
+        print ""
+
+#Evaluate from perspective of computer (i.e white)
+def evaluateBoard(board):
+    global n
+    for i in xrange(0,n):
+        for j in xrange(0,n):
+            pass
+        
+def moveCheck(loc1, loc2, board):
+    yi, xi = loc1
+    yf, xf = loc2
+    
+    if(yi==yf):
+            print "Invalid move. Move piece towards goal."
+            return False
+    if(abs(yf-yi)>1 or abs(xf-xi)>1):
+            print "Invalid move. Only one step distance allowed."
+            return False
+    print board[yi][xi]
+    print board[yf][xf]
+    #White player can move down or down diagonal one step
+    if(board[yi][xi]==1):
+        if(yf-yi!=1):
+            print "Invalid move. Move towards your goal."
+            return False
+        else:
+            #Normal move
+            if(xi==xf):
+                if(board[yf][xf]!=0):
+                    print "Invalid way. Piece in way."
+                    return False
+                else:
+                    return True
+            #Possible capture move
+            else:
+                if(board[yf][xf]==2):
+                    print "Opponent piece captured."
+                    return True
+                elif(board[yf][xf]==1):
+                    print "Invalid move. Cannot capture self piece."
+                    return False
+                else:
+                    print "Invalid move. No capture piece."
+                    return False
+    #Black player can move up or up diagonal one step
+    elif(board[yi][xi]==2):
+        if(yf-yi!=-1):
+            print "Invalid move. Move towards your goal."
+            return False
+        else:
+            #Normal move
+            if(xi==xf):
+                if(board[yf][xf]!=0):
+                    print "Invalid way. Piece in way."
+                    return False
+                else:
+                    board[yf][xf] = board[yi][xi]
+                    board[yi][xi] = 0
+                    return True
+            #Possible capture move
+            else:
+                if(board[yf][xf]==1):
+                    board[yf][xf] = board[yi][xi]
+                    board[yi][xi] = 0
+                    print "Opponent piece captured."
+                    return True
+                elif(board[yf][xf]==2):
+                    print "Invalid move. Cannot capture self piece."
+                    return False
+                else:
+                    print "Invalid move. No capture piece."
+                    return False
+    else:
+        print "Invalid move. No piece at position."
+        return False
+
+print "Terminate game with -1 -1"        
+
+init(8)
+printBoard(initboard)
+
+def getHumanMove():
+    print "Enter initial position (row,col) : ",
+    a,b = raw_input().strip().split(' ')
+    print "Enter final position (row,col) : ",
+    c,d = raw_input().strip().split(' ')
+    a = int(a)
+    b = int(b)
+    c = int(c)
+    d = int(d)
+    return (a,b,c,d)
+
+def getComputerMove():
+    getHumanMove()
+
+#Main loop
+while(1):
+
+    #Turn logic
+    if(movebit==0)
+        a,b,c,d = getComputerMove()
+    else:
+        a,b,c,d = getHumanMove()
+
+    #Check winning condition
+    if(checkWin(initboard)):
+        a,b = -1,-1
+
+    #Forfeit and winning condition
+    if(a==-1 and b==-1):
+        if(turnbit==0)
+            print "Computer loses."
+        else:
+            print "Human loses."
+        break
+
+    #Check if move is valid (meant for human players)
+    res = moveCheck((a,b),(c,d),initboard)
+
+    #Execute move if valid, and invert the movebit
+    if(res):
+        initboard[c][d] = initboard[a][b]
+        initboard[a][b] = 'X'
+        movebit^=1    
+    printBoard(initboard)
+    evaluateBoard(initboard)
+
+print "Game terminated"
