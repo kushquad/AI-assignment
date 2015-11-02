@@ -1,26 +1,124 @@
-n = 0
-initboard = []
+import copy
+import colorama
+import keypress
+import os
 
-#0 for white, 1 for black
-#White(computer) starts first
+#Global Constants
+INF = 2000
+GAMESIZE = 4
+
+#Main game variables
+n = 0											#Size of board
+maxdepth = 4									#Sets the lookahead ply depth 
+initboard = {'board':[],'bcount':0,'rcount':0}	#Main playing board
+prunes = 0										#Counts number of prunes
+alphabeta = False								#Toggles alpha-beta pruning
+
+#GUI variables for selection pointer display
+#getpos stores position of last known selector, we 'get' it from there
+#lastpos indicates position of green selector (first selector)
+#Nlastpos indicates position of magenta selector (second selector)
+#First and second selector's choose initial and final positions respectively
+getpos = [-1,-1]
+lastpos = [-1,-1]
+Nlastpos = [-1,-1]
+
+#0 for red, 1 for blue
+#Red(computer) starts first
 movebit = 0
 
+#Initialize
+#	-size of game board is bound
+# 	-allocate memory for game board
+#	-Initialize colorama module
+#	-Set getpos selector to right-bottom edge of board
 def init(size):
-    global n
-    global initboard
-    n = size
-    for i in xrange(0,n):
-        lis = []
-        for j in xrange(0,n):
-            lis.append(0)
-        initboard.append(lis)
+	global n
+	global initboard
+	global getpos
+	colorama.init()
+	n = size
+	getpos = [n-1,n-1]
+	for i in xrange(0,n):
+		lis = []
+		for j in xrange(0,n):
+			lis.append(0)
+		initboard['board'].append(lis)
 
-    #1 for W at top, 2 for B at bottom
-    for i in xrange(0,n):
-        initboard[0][i] = 1
-        initboard[n-1][i] = 2
+	#1 for Red at top, 2 for Blue at bottom
+	for i in xrange(0,n):
+		initboard['board'][0][i] = 1
+		initboard['board'][n-1][i] = 2			#Initboard is comprised of the main board matrix
+	initboard['rcount']=n						#and the count of white and black pieces
+	initboard['bcount']=n        				#for optimized heuristic calculation
 
+#######################################GUI FUNCTIONALITY##############################################
+#Print game token according to matrix value
+def getPrintChar(boardelement):
+	if(boardelement==1):
+		return colorama.Fore.RED+"O"
+	if(boardelement==2):
+		return colorama.Fore.CYAN+"X"
+	return " "
 
+#Print board in color
+#	-Yellow and Black alternate overlay for board
+#	-Green and magenta for square selector
+#	-Each cell of board is 2x3 matrix in command window
+#	-A token if any appears on the bottom of the board
+def generateBoard(board):
+	global n
+	#For every row
+	for i in xrange(0,n):
+		#Top and bottom sections of each cell, 0 for top, 1 for bottom - printing any game token
+		for j in xrange(0,2):
+			if(j!=1):			
+				for k in xrange(0,n):
+					if(lastpos[0]==i and lastpos[1]==k):
+						print colorama.Back.GREEN+"  ",
+					elif(Nlastpos[0]==i and Nlastpos[1]==k):
+						print colorama.Back.MAGENTA+"  ",
+					elif((i+k)%2==0):
+						print colorama.Back.BLACK+"  ",
+					else:
+						print colorama.Back.YELLOW+"  ",
+				print colorama.Back.BLACK+""
+			else:
+				for k in xrange(0,n):
+					if(lastpos[0]==i and lastpos[1]==k):
+						print colorama.Back.GREEN+" "+getPrintChar(board['board'][i][k]),
+					elif(Nlastpos[0]==i and Nlastpos[1]==k):
+						print colorama.Back.MAGENTA+" "+getPrintChar(board['board'][i][k]),
+					elif((i+k)%2==0):
+						print colorama.Back.BLACK+" "+getPrintChar(board['board'][i][k]),
+					else:
+						print colorama.Back.YELLOW+" "+getPrintChar(board['board'][i][k]),
+				print colorama.Back.BLACK+""
+
+#Return default command line colors after printing game board
+#To improve : Get command line colors and store them
+def cleanup():
+	print colorama.Back.BLACK+colorama.Fore.WHITE
+
+#Check if first selector is valid and then update location
+def move(y,x):
+	global lastpos
+	if(x<0 or y<0 or x>=n or y>=n):
+		return False
+	else:
+		lastpos[0] = y
+		lastpos[1] = x
+
+#Check if second selector is valid and then update location
+def Nmove(y,x):
+	global Nlastpos
+	if(x<0 or y<0 or x>=n or y>=n):
+		return False
+	else:
+		Nlastpos[0] = y
+		Nlastpos[1] = x
+
+#Print in plain text the state of board
 def printBoard(board):
     global n
     print " ",
@@ -30,138 +128,422 @@ def printBoard(board):
     for i in xrange(0,n):
         print i,
         for j in xrange(0,n):
-            if(board[i][j]==0):
+            if(board['board'][i][j]==0):
                 print 'X',
-            elif(board[i][j]==1):
-                print 'W',
-            elif(board[i][j]==2):
+            elif(board['board'][i][j]==1):
+                print 'R',
+            elif(board['board'][i][j]==2):
                 print 'B',
         print ""
+#################################END OF GUI FUNCTIONALITY############################################
 
-#Evaluate from perspective of computer (i.e white)
-def evaluateBoard(board):
-    global n
-    for i in xrange(0,n):
-        for j in xrange(0,n):
-            pass
-        
-def moveCheck(loc1, loc2, board):
+#################################ARTIFICIAL INTELLIGENCE MODULES#####################################
+#Execute move and update board
+#The execution is completed after checking if move is valid.
+def moveExecute(ini,fin,board):
+    yi, xi = ini
+    yf, xf = fin
+    board['board'][yf][xf] = board['board'][yi][xi]
+    board['board'][yi][xi] = 0
+
+
+#Check if the move is valid.
+#	-Moving out of bounds
+#	-Moving too far than allowed step size
+# 	-Trying to capture own-self
+#	-Going backwards or sideways (includes no movements towards goal)
+#	-Attempting to move diagonally without capturable piece	
+def moveCheck(loc1, loc2, board,verbose=0):
+	#Verbose flag is off by default
+	#This is for printing output for a human move, but supressing the same when Tree Search algorithm runs
     yi, xi = loc1
     yf, xf = loc2
     
+    #If no movement towards respective goals.
     if(yi==yf):
-            print "Invalid move. Move piece towards goal."
-            return False
+		if(verbose==1):
+			print "Invalid move. Move piece towards goal."
+		return False
+	
+	#Out of bounds check
+    if(xi<0 or xf<0 or yi<0 or yf<0 or xi>=n or xf>=n or yi>=n or yf>=n):
+        if(verbose==1):
+        	print "Invalid move. Indexes out of range."
+        return False
+    
+    #Moving too far beyond step size
     if(abs(yf-yi)>1 or abs(xf-xi)>1):
-            print "Invalid move. Only one step distance allowed."
+            if(verbose==1):
+            	print "Invalid move. Only one step distance allowed."
             return False
-    print board[yi][xi]
-    print board[yf][xf]
-    #White player can move down or down diagonal one step
-    if(board[yi][xi]==1):
+
+    #Red player can move down or down diagonal one step
+    if(board['board'][yi][xi]==1):
         if(yf-yi!=1):
-            print "Invalid move. Move towards your goal."
-            return False
+			if(verbose==1):
+				print "Invalid move. Move towards your goal."
+			return False
+        
         else:
+            
             #Normal move
             if(xi==xf):
-                if(board[yf][xf]!=0):
-                    print "Invalid way. Piece in way."
+                if(board['board'][yf][xf]!=0):
+                    if(verbose==1):
+                    	print "Invalid way. Piece in way."
                     return False
                 else:
                     return True
+            
             #Possible capture move
             else:
-                if(board[yf][xf]==2):
-                    print "Opponent piece captured."
+                if(board['board'][yf][xf]==2):
+                    if(verbose==1):
+                    	print "Opponent piece captured."
+                    board['bcount']-=1
                     return True
-                elif(board[yf][xf]==1):
-                    print "Invalid move. Cannot capture self piece."
+                elif(board['board'][yf][xf]==1):
+                    if(verbose==1):
+                    	print "Invalid move. Cannot capture self piece."
                     return False
                 else:
-                    print "Invalid move. No capture piece."
+                    if(verbose==1):
+                    	print "Invalid move. No capture piece."
                     return False
-    #Black player can move up or up diagonal one step
-    elif(board[yi][xi]==2):
+    
+    #Blue player can move up or up diagonal one step
+    elif(board['board'][yi][xi]==2):
         if(yf-yi!=-1):
-            print "Invalid move. Move towards your goal."
+            if(verbose==1):
+            	print "Invalid move. Move towards your goal."
             return False
+        
         else:
+        
             #Normal move
             if(xi==xf):
-                if(board[yf][xf]!=0):
-                    print "Invalid way. Piece in way."
+                if(board['board'][yf][xf]!=0):
+                    if(verbose==1):
+                    	print "Invalid way. Piece in way."
                     return False
                 else:
-                    board[yf][xf] = board[yi][xi]
-                    board[yi][xi] = 0
                     return True
+                    
             #Possible capture move
             else:
-                if(board[yf][xf]==1):
-                    board[yf][xf] = board[yi][xi]
-                    board[yi][xi] = 0
-                    print "Opponent piece captured."
+                if(board['board'][yf][xf]==1):
+                    if(verbose==1):
+                    	print "Opponent piece captured."
+                    board['rcount']-=1
                     return True
-                elif(board[yf][xf]==2):
-                    print "Invalid move. Cannot capture self piece."
+                elif(board['board'][yf][xf]==2):
+                    if(verbose==1):
+                    	print "Invalid move. Cannot capture self piece."
                     return False
                 else:
-                    print "Invalid move. No capture piece."
+                    if(verbose==1):
+                    	print "Invalid move. No capture piece."
                     return False
+                    
+    #Selecting an empty cell
     else:
-        print "Invalid move. No piece at position."
+        if(verbose==1):
+        	print "Invalid move. No piece at position."
         return False
 
-print "Terminate game with -1 -1"        
+#Construct a list of all possible game boards from the given state and turn(red/blue)
+def getAllMoves(turnbit, board):
+    
+	global n
+	moveboards = []			#List of possible game boards
+    
+	redpieces = []
+	bluepieces = []
+	for i in xrange(0,n):
+		for j in xrange(0,n):
+			if(board['board'][i][j]==1):
+				redpieces.append((i,j))
+			if(board['board'][i][j]==2):
+				bluepieces.append((i,j))
 
-init(8)
-printBoard(initboard)
+	#print bluepieces
+	#Procedure - i) Create a temporary board copying initboard
+	#			ii) For each move possible, check if valid
+	#		   iii)	If move is valid, execute and add to game board list
+	
+	#If red's turn
+	if(turnbit==0):
+		for p in redpieces:
+			y,x = p
 
-def getHumanMove():
-    print "Enter initial position (row,col) : ",
-    a,b = raw_input().strip().split(' ')
-    print "Enter final position (row,col) : ",
-    c,d = raw_input().strip().split(' ')
-    a = int(a)
-    b = int(b)
-    c = int(c)
-    d = int(d)
+			for r in [(y+1,x-1),(y+1,x),(y+1,x+1)]:
+				tempboard = copy.deepcopy(board)
+				if(moveCheck((y,x),r,tempboard)):
+					moveExecute((y,x),r,tempboard)
+					moveboards.append((tempboard,(y,x),(r)))
+    
+    #If blue's turn
+	else:
+		for p in bluepieces:
+			y,x = p
+			for r in [(y-1,x-1),(y-1,x),(y-1,x+1)]:
+				tempboard = copy.deepcopy(board)
+				if(moveCheck((y,x),r,tempboard)):
+					moveExecute((y,x),r,tempboard)
+					moveboards.append((tempboard,(y,x),(r)))
+		#print moveboards
+	return moveboards
+
+#Check if game is won, does not account for fact that no moves are possible
+#This is implicitly checked for computer - when possible moves are generated
+#It is up to the human to decide when to forfeit
+def checkWin(board):
+    global n
+    for i in xrange(0,n):
+        if(board['board'][0][i]==2 or board['board'][n-1][i]==1):
+            return True
+    if(board['bcount']==0 or board['rcount']==0):
+            return True
+    return False       
+    
+#Evaluate from perspective of computer (i.e red)
+def evaluateBoard(board):
+    global n
+    sum = 0
+
+    if(checkWin(board)):
+        #Expand range [0,1] to [-1,1]
+        #If movebit is 0, after victory, it is computer's turn i.e human wins
+        #Assign -INF utility if human wins
+        #Assign +INF for win
+        return (movebit*2-1)*INF
+    
+    for i in xrange(0,n):
+        for j in xrange(0,n):
+            if(board['board'][i][j]==1):
+            	if(i!=0):
+                	sum += i**i
+            if(board['board'][i][j]==2):
+            	if(n-1-i!=0):
+                	sum -= (n-1-i)**(n-i-1)
+    sum-=board['bcount']*board['bcount']*board['bcount']
+    sum+=board['rcount']*board['rcount']*board['rcount']        
+    return sum  
+    
+#Minimax algorithm
+def minimax(vertex, depth):
+    if(depth==maxdepth):
+        return evaluateBoard(vertex[0])
+    queue = getAllMoves(depth%2,vertex[0])
+    maxutil = -2001
+    minutil = 2001
+    for v in queue:
+        util = minimax(v,depth+1)
+        maxutil = max(maxutil, util)
+        minutil = min(minutil, util)
+
+    if(depth%2==0):
+        return maxutil
+    else:
+        return minutil
+
+#Alpha-beta minimax algorithm
+def alphabetaminimax(vertex, depth, minbound, maxbound):
+    global prunes
+    if(depth==maxdepth):
+        return evaluateBoard(vertex[0])
+    queue = getAllMoves(depth%2,vertex[0])
+    if(depth%2==0):
+        val = minbound
+        for v in queue:
+            newval = alphabetaminimax(v, depth+1, val, maxbound)
+            if(newval > val):
+                val = newval
+            if(val>maxbound):
+                prunes+=1
+                return maxbound
+        return val
+    else:
+        val = maxbound
+        for v in queue:
+            newval = alphabetaminimax(v, depth+1, minbound, val)
+            if(newval < val):
+                val = newval
+            if(val<minbound):
+                prunes+=1
+                return minbound
+        return val
+         
+################################END OF AI MODULES##########################################################
+
+################################INTERACTION MODULES########################################################
+#Generates a list of all moves
+#If no moves possible, signals to caller
+#Calculates minimax tree for moves and derives one with maximum utility   
+def getComputerMove():
+    global prunes
+    prunes = 0
+    lis = getAllMoves(0,initboard)
+    if(len(lis)==0):
+        return (-1,-1,0,0)
+    maxutil = -2001
+    a,b,c,d = 0,0,0,0
+    temp = 0
+    for e in lis:
+    	#If alphabeta is enabled
+        if(alphabeta):
+            temp = alphabetaminimax(e,1,-2001,2001)
+        else:
+            temp = minimax(e,1)
+            print temp
+            print e[1],e[2]
+        if(temp>maxutil):
+            a,b = e[1]
+            c,d = e[2]
+            maxutil = temp
+    print "Maxutil:",maxutil
+    #Count Prunes done if alpha-beta is enabled
+    print "Prunes :",prunes
     return (a,b,c,d)
 
-def getComputerMove():
-    getHumanMove()
+#We need to bring selector to focus, since human is playing
+#Call getInput() from GUI module to activate selector and keypress
+def getHumanMove():
+	lastpos=getpos[:]
+	return getInput()
+
+#Print whose turn it is based on movebit	
+def turnPrint():
+    if(movebit==0):
+        print "Red's move."
+    else:
+        print "Blue's move."
+
+
+#Low level keyboard handler which signals to GUI response for selectors
+#The value returned is fed into main loop for checking move and updating board
+def getInput():
+	global lastpos, Nlastpos, getpos
+	lastpos = getpos[:]
+	print "Lastpos : ",lastpos	
+	generateBoard(initboard)
+	while(1):
+		p = ord(keypress.getch())
+		if(p==27 or p==91):
+			continue
+		if(p==65):
+			move(lastpos[0]-1,lastpos[1])
+			print "Up"
+		if(p==66):
+			move(lastpos[0]+1,lastpos[1])
+			print "Down"
+		if(p==67):
+			move(lastpos[0],lastpos[1]+1)
+			print "Right"
+		if(p==68):
+			move(lastpos[0],lastpos[1]-1)
+			print "Left"
+		if(p==13):
+			Nlastpos = lastpos[:]	
+			while(1):
+				q = ord(keypress.getch())
+				if(q==27 or q==91):
+					continue			
+				if(q==65):
+					Nmove(Nlastpos[0]-1,Nlastpos[1])
+				if(q==66):
+					Nmove(Nlastpos[0]+1,Nlastpos[1])
+				if(q==67):	
+					Nmove(Nlastpos[0],Nlastpos[1]+1)
+				if(q==68):
+					Nmove(Nlastpos[0],Nlastpos[1]-1)
+				if(q==13):
+					res = (lastpos[0],lastpos[1],Nlastpos[0],Nlastpos[1])					
+					getpos = lastpos[:]
+					lastpos = [-1,-1]
+					Nlastpos = [-1,-1]
+					os.system("clear")
+					generateBoard(initboard)
+					cleanup()
+					return res
+				if(q==127):
+					Nlastpos = [-1,-1]
+					os.system("clear")
+					generateBoard(initboard)
+					cleanup()
+					break
+				if(q==113):
+					getpos = lastpos[:]
+					lastpos = [-1,-1]
+					Nlastpos = [-1,-1]
+					os.system("clear")
+					generateBoard(initboard)
+					cleanup()
+					return (-1,-1,0,0)
+				os.system("clear")
+				generateBoard(initboard)
+				cleanup()
+		if(p==113):
+			getpos = lastpos[:]
+			lastpos = [-1,-1]
+			Nlastpos = [-1,-1]
+			os.system("clear")
+			generateBoard(initboard)
+			cleanup()
+			return (-1,-1,0,0)
+
+		os.system("clear")
+		generateBoard(initboard)
+		cleanup()
+	Nlastpos = [-1,-1]
+	getpos = lastpos[:]
+	lastpos = [-1,-1]
+	os.system("clear")
+	generateBoard(initboard)
+	cleanup()
+
+################################END OF INTERACTION MODULES##################################################
+
+#######################################MAIN GAME LOOP#######################################################                   
+#Input variables
+a,b,c,d = (0,0,0,0)
+#Initialize      
+init(GAMESIZE)
 
 #Main loop
 while(1):
 
-    #Turn logic
-    if(movebit==0)
-        a,b,c,d = getComputerMove()
-    else:
-        a,b,c,d = getHumanMove()
-
+	#Draw board, print details
+	generateBoard(initboard)
+	print "Utility :",evaluateBoard(initboard)
+	turnPrint()
+	
     #Check winning condition
-    if(checkWin(initboard)):
-        a,b = -1,-1
-
+	if(checkWin(initboard)):
+		a,b = -1,-1
+	else:
+        #Turn logic
+		if(movebit==0):
+			a,b,c,d = getComputerMove()
+		else:
+			a,b,c,d = getHumanMove()
+            
     #Forfeit and winning condition
-    if(a==-1 and b==-1):
-        if(turnbit==0)
-            print "Computer loses."
-        else:
-            print "Human loses."
-        break
-
+	if(a==-1 and b==-1):
+		if(movebit==0):
+			print "Computer loses."
+		else:
+			print "Human loses."
+		break
+    
     #Check if move is valid (meant for human players)
-    res = moveCheck((a,b),(c,d),initboard)
+	res = moveCheck((a,b),(c,d),initboard,1)
 
     #Execute move if valid, and invert the movebit
-    if(res):
-        initboard[c][d] = initboard[a][b]
-        initboard[a][b] = 'X'
-        movebit^=1    
-    printBoard(initboard)
-    evaluateBoard(initboard)
-
+	if(res):
+		moveExecute((a,b),(c,d),initboard)
+		movebit^=1
+		
+#End of game
 print "Game terminated"
+#################################################END OF PROGRAM############################################
