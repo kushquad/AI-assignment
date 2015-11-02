@@ -1,1 +1,207 @@
+#Custom written python class for implementing priority queue
+#as heap. Used for Best-First Search.
+import priorityqueue as PQ
 
+#Hopmatrix is read from user file 'source' defaults to "HopMatrix.txt"
+source = "HopMatrix.txt"
+
+#Data structures are hopmatrix and visited
+hopmatrix = []
+#	Hopmatrix reads both the coordinates from the text file and the (a,b) values
+#	This is therefore stored as a 4-tuple 
+visited = []
+#	Visited is a matrix which is set to False initially to denote it is unvisited
+#	Whenever the node is visited, visited is set to its parent
+#	This helps backtrack the path taken to goal
+
+#m and n correspond to rows and columns of the hopmatrix respectively
+m=0
+n=0
+
+#Initialize the visited matrix with False values to match size of hop matrix
+def initializevisited():
+    global visited
+    for i in xrange(0,m):
+        lis = []
+        for j in xrange(0,n):
+            lis.append(False)
+        visited.append(lis)
+        
+#Reads hop matrix from file
+#Note that the destination is specially marked 'DEST','DEST'
+def readhopmatrix():
+    global hopmatrix
+    file = open(source,"r")
+    i=0
+
+    for line in file:
+        row = line.split(' ')
+        ls = []
+        j=0
+        for ele in row:
+            cell = ele.split(',')
+            if(not cell[0]=="DEST"):
+                cell[0] = int(cell[0])
+                cell[1] = int(cell[1])
+            cell.append(i)
+            cell.append(j)
+            ls.append(cell)
+            j+=1
+        hopmatrix.append(ls)
+        i+=1
+
+	#Set the dimensions of the matrix globally
+    global m,n
+    m = len(hopmatrix)
+    n = len(hopmatrix[0])
+    file.close()
+
+#Goal is reached if the first element of 4-tuple in hopmatrix data structure is 'DEST'
+#4-tuple is (a,b,x,y) - where (a,b) are defined by question and (x,y) are coordinates
+#state is a hopmatrix type object
+def goalTest(state):      
+    return state[0]=="DEST"
+
+#Check for all the moves originating from the cell, if the move is out of bounds
+def boundscheck(i,j):
+    global m,n
+    return ((i>=0 and i<m) and (j>=0 and j<n))
+
+#Find all valid moves from a given state
+#state is a 4-tuple object of hopmatrix type
+def getMoves(state):
+
+    global hopmatrix
+    possiblemoves = []
+    movelist = []
+    #state[2], state[3] are x,y coordinates of state
+    i = state[2]
+    j = state[3]
+
+	#If a=0, we may traverse a range of values varying from 0 to b in all directions
+    if(state[0]==0):
+        k = state[1]+1
+        #for k in range(1,state[1]+1):
+        possiblemoves.append([i+k,j])
+        possiblemoves.append([i-k,j])
+        possiblemoves.append([i,j+k])
+        possiblemoves.append([i,j-k])
+
+    else:
+        b = state[1]+1
+        #If b=1, we may only reach states on the right and bottom at distance b
+        if(state[0]==1):
+            possiblemoves.append([i+b,j])
+            possiblemoves.append([i,j+b])
+       	#If b=-1, we may only reach states on the left and top at distance b
+        elif(state[0]==-1):
+            possiblemoves.append([i-b,j])
+            possiblemoves.append([i,j-b])
+        #Failsafe Test - code should never come here
+        else:
+            print "Not a valid matrix state.",state
+
+	#Check if these moves generated are actually valid
+	#If so, then add into the valid structure of movelist
+    for move in possiblemoves:
+         if(boundscheck(move[0],move[1])):
+             movelist.append(hopmatrix[move[0]][move[1]])
+                
+    return movelist
+
+#Heuristic function is defined as
+#	 H(n) = h(n) + g(n)
+# where h(n) must be admissible
+# and g(n) be a running cost
+
+# Here we use the value of a as an admissible heuristic
+# 		h(n) = 2 if a=-1, 1 otherwise; for any node n!=goal node
+# To prove this:
+#	i) Note that on a cell with a=-1, we need to go back one step.
+#	ii) This backward step is accounted for.
+#	iii) Now in the best case, the cell where we land directly takes us to goal.
+#		 One more step accounted.
+#	Thus the cost will always be <=2.
+#	iv) For a=0 or a=1, we need to atleast make a step
+#   Hence our heuristic always underestimates.
+def Hheuristic(state):
+    if(state[0]==-1):
+        return 2
+    elif(state[0]==0 or state[0]==1):
+        return 1
+
+#Print the backtrace given the backtracelist
+def backtracePrint(backtracelist):
+	l = len(backtracelist)
+	i = 0
+	while(i<=l-2):
+		print str(backtracelist[i])+"->",
+		i+=1
+	print str(backtracelist[-1])
+
+#Main A* Search algorithm
+#state is a 4-tuple of hopmatrix type    
+def AStarSearch(state):
+    global visited
+    path = []
+
+	#Check for matrix of size 1
+    if(goalTest(state)):
+    	visited[state[2]][state[3]]=True
+        print "Destination reached in 1 move."
+        return True
+
+	#Initialize priority queue, set initial vertex visited.
+	#Enqueue the state with calculated heuristic
+	#The priority queue element is of type (state, running distance g(state), h(state))
+	#	where h and g are components of the total heuristic, h being admissible
+    pq = PQ.priorityqueue()
+    visited[state[2]][state[3]] = True
+    pq.enqueue((state,1,Hheuristic(state)))
+
+	#Algorithm works till queue is empty => all paths exhausted, no path to goal
+    #print pq.data
+    while(not pq.empty()):
+    	#Find all moves of the best node
+        temp = pq.dequeue()
+        state = temp[0]
+        moves = getMoves(state)
+
+        for m in moves:
+        	#Check if one of the moves is to goal
+            if(goalTest(m)):
+                print "Destination reached in",temp[1]+1,"moves."
+                visited[m[2]][m[3]]=(state[2],state[3])
+                return True
+            if(visited[m[2]][m[3]]==False):
+                pq.enqueue((m,temp[1]+1,Hheuristic(m)))
+                visited[m[2]][m[3]]=(state[2],state[3])
+            #Notice the updation of visited data structues with the parent
+            #This helps in backtracing the path to goal
+    	#DEBUG
+    	#print pq.data
+    	#print state
+    	#print moves
+    	#print ""
+    #If no path found
+    return False
+
+#Read matrix and initialize visited matrix    
+readhopmatrix()
+initializevisited()   
+
+#Start A* search from initial node
+if(AStarSearch(hopmatrix[0][0])):
+	#Backtracing - Start with visited[m-1][n-1] and trace it back to initial state
+	trace = visited[m-1][n-1]
+	lis = [(m-1,n-1)]
+	while(trace!=True):
+		lis.append(trace)
+		trace = visited[trace[0]][trace[1]]
+	#Reverse the trace to get backtrace i.e from start to goal
+	lis.reverse()
+
+	#Print backtrace
+	backtracePrint(lis)
+else:
+	print "No path to goal found."
